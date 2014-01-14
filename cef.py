@@ -276,18 +276,24 @@ def _len(data):
     return len(str(data))
 
 
+def _force_unicode(s):
+    if isinstance(s, str):
+        try:
+            s = unicode(s, 'utf8', 'replace')
+        except UnicodeDecodeError:
+            try:
+                s = s.decode('utf8', 'replace')
+            except UnicodeDecodeError, e:
+                raise UnicodeDecodeError("Unable to force a unicode string", e)
+    return s
+
+
 def _format_msg(fields, kw, maxlen=_MAXLEN):
     # adding custom extensions
     # sorting by size
-    for k, v in fields.items():
-        if isinstance(v, str):
-            try:
-                v = unicode(v, 'utf8', 'replace')
-            except UnicodeDecodeError:
-                try:
-                    v = v.decode('utf8', 'replace')
-                except UnicodeDecodeError, e:
-                    raise UnicodeDecodeError("Unable to force unicode string", e)
+    if kw.get('keep_unicode', False):
+        for k, v in fields.items():
+            v = _force_unicode(v)
             fields[k] = v
 
     msg = _CEF_FORMAT % fields
@@ -300,14 +306,7 @@ def _format_msg(fields, kw, maxlen=_MAXLEN):
     msg_len = len(msg)
 
     if kw.get('keep_unicode', False):
-        if isinstance(msg, str):
-            try:
-                msg = unicode(msg, "UTF-8", "replace")
-            except UnicodeDecodeError:
-                try:
-                    msg = msg.decode('utf8', 'replace')
-                except UnicodeDecodeError, e:
-                    raise UnicodeDecodeError("Unable to force unicode string", e)
+        msg = _force_unicode(msg)
 
     for value_len, key_len, key, value in extensions:
         added_len = value_len + key_len + 2
@@ -324,6 +323,7 @@ def _format_msg(fields, kw, maxlen=_MAXLEN):
 
         if kw.get('keep_unicode', False):
             fragment = fragment.decode('utf8', 'replace')
+
         msg += fragment
 
         msg_len += added_len
