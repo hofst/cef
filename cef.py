@@ -322,7 +322,7 @@ def _format_msg(fields, kw, maxlen=_MAXLEN):
         fragment = ' %s=%s' % (key, value)
 
         if kw.get('keep_unicode', False):
-            fragment = fragment.decode('utf8', 'replace')
+            fragment = _force_unicode(fragment)
 
         msg += fragment
 
