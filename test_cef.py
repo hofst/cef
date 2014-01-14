@@ -181,7 +181,7 @@ class TestCEFLogger(unittest.TestCase):
         file_ = config['cef.file']
 
         environ = {'PATH_INFO':
-                u'/reviewers/receipt/issue/\u043f\u0442\u0442-news'}
+                   u'/reviewers/receipt/issue/\u043f\u0442\u0442-news'}
         kw = {'cs2': 1L,
               'cs2Label': u'\xd0'}
 
@@ -190,6 +190,33 @@ class TestCEFLogger(unittest.TestCase):
             data = f.read()
 
         self.assertTrue('cs2Label=\xc3\x90' in data, data)
+
+    def test_formater_keep_unicode(self):
+        config = {'cef.version': '0', 'cef.vendor': 'mozilla',
+                  'cef.device_version': '3', 'cef.product': 'weave',
+                  'cef': True, 'cef.file': mkstemp()[1]}
+
+        environ = {'PATH_INFO':
+                   u'/reviewers/receipt/issue/\u043f\u0442\u0442-news'}
+        kw = {'cs2': 1L,
+              'cs2Label': u'\xd0',
+              'keep_unicode': True}
+
+        from cef import _get_fields, _format_msg, _filter_params
+        config = _filter_params('cef', config)
+
+        name = 'name'
+        severity = 0
+        username = u'tarek'
+        signature = 'xx'
+
+        fields = _get_fields(name, severity, environ, config,
+                             username=username, signature=signature, **kw)
+        msg = _format_msg(fields, kw)
+
+        self.assertEquals(type(msg), unicode)
+        self.assertTrue(u'cs2Label=\xd0' in msg, msg)
+        self.assertTrue(u'keep_unicode' not in msg, msg)
 
 
 class TestCEFFormatter(unittest.TestCase):

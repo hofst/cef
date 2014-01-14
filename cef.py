@@ -77,6 +77,8 @@ except ImportError:
     _SYSLOG_OPTIONS = _SYSLOG_PRIORITY = _SYSLOG_FACILITY = None
     SYSLOG = False
 
+_KEEP_UNICODE = False
+
 import logging
 import socket
 from time import strftime
@@ -103,7 +105,7 @@ _CEF_FORMAT = ('%(date)s %(host)s CEF:%(version)s|%(vendor)s|%(product)s|'
                'src=%(source)s dhost=%(dest)s suser=%(suser)s')
 
 _EXTENSIONS = ['cs1Label', 'cs1', 'requestMethod', 'request', 'src', 'dhost',
-               'suser']
+               'suser', 'keep_unicode']
 _PREFIX = re.compile(r'([|\\\r\n])')
 _EXTENSION = re.compile(r'([\\=])')
 _KEY = re.compile(r'^[a-zA-Z0-9_\-.]+$')
@@ -131,9 +133,10 @@ def _convert_prefix(data):
     return _PREFIX.sub(r'\\\1', data)
 
 
-def _convert_ext(data):
+def _convert_ext(data, keep_unicode=False):
     """Escapes | and = and convert to utf8 string"""
-    data = _to_str(data)
+    if not keep_unicode:
+        data = _to_str(data)
     return _EXTENSION.sub(r'\\\1', data)
 
 
@@ -159,7 +162,7 @@ def _syslog(msg, config):
             syslog.openlog(ident, logopt, facility)
             _LOG_OPENED = ident, logopt, facility
         if isinstance(msg, unicode):
-            msg = msg.encode('utf-8')
+            msg = msg.encode('utf8')
         syslog.syslog(priority, msg)
 
 
@@ -209,7 +212,7 @@ def _filter_params(namespace, data, replace_dot='_', splitchar='.'):
 
 
 def _get_fields(name, severity, environ, config, username=None,
-               signature=None, **kw):
+                signature=None, **kw):
     name = _convert_prefix(name)
     if signature is None:
         signature = name
@@ -219,22 +222,38 @@ def _get_fields(name, severity, environ, config, username=None,
     severity = _convert_prefix(severity)
     source = _get_source_ip(environ)
 
+    keep_unicode = False
+    if 'keep_unicode' in kw:
+        _host = _HOST
+        _username = username
+        keep_unicode = True
+    else:
+        _host = _to_str(_HOST)
+        _username = _to_str(username)
+
     fields = {'severity': severity,
               'source': source,
-              'method': _convert_ext(environ.get('REQUEST_METHOD', '')),
-              'url': _convert_ext(environ.get('PATH_INFO', '')),
-              'dest': _convert_ext(environ.get('HTTP_HOST', u'none')),
+              'method': _convert_ext(environ.get('REQUEST_METHOD', ''),
+                                     keep_unicode),
+              'url': _convert_ext(environ.get('PATH_INFO', ''),
+                                  keep_unicode),
+              'dest': _convert_ext(environ.get('HTTP_HOST', u'none'),
+                                   keep_unicode),
               'user_agent': _convert_ext(environ.get('HTTP_USER_AGENT',
-                                                     u'none')),
+                                                     u'none'),
+                                         keep_unicode),
               'signature': signature,
               'name': name,
               'version': config['version'],
               'vendor': config['vendor'],
               'device_version': config['device_version'],
               'product': config['product'],
-              'host': _to_str(_HOST),
-              'suser': _to_str(username),
+              'host': _host,
+              'suser': _username,
               'date': strftime("%b %d %H:%M:%S")}
+
+    # Discard the keep_unicode key.
+    kw.pop('keep_unicode', None)
 
     # make sure we don't have a | anymore in regular fields
     for key, value in list(kw.items()):
@@ -260,14 +279,35 @@ def _len(data):
 def _format_msg(fields, kw, maxlen=_MAXLEN):
     # adding custom extensions
     # sorting by size
+    for k, v in fields.items():
+        if isinstance(v, str):
+            try:
+                v = unicode(v, 'utf8', 'replace')
+            except UnicodeDecodeError:
+                try:
+                    v = v.decode('utf8', 'replace')
+                except UnicodeDecodeError, e:
+                    raise UnicodeDecodeError("Unable to force unicode string", e)
+            fields[k] = v
+
     msg = _CEF_FORMAT % fields
 
     extensions = [(_len(value), len(key), key, value)
-                    for key, value in kw.items()
+                  for key, value in kw.items()
                   if key not in _EXTENSIONS]
     extensions.sort()
 
     msg_len = len(msg)
+
+    if kw.get('keep_unicode', False):
+        if isinstance(msg, str):
+            try:
+                msg = unicode(msg, "UTF-8", "replace")
+            except UnicodeDecodeError:
+                try:
+                    msg = msg.decode('utf8', 'replace')
+                except UnicodeDecodeError, e:
+                    raise UnicodeDecodeError("Unable to force unicode string", e)
 
     for value_len, key_len, key, value in extensions:
         added_len = value_len + key_len + 2
@@ -280,7 +320,12 @@ def _format_msg(fields, kw, maxlen=_MAXLEN):
             logger.warning(warn)
             break
 
-        msg += ' %s=%s' % (key, value)
+        fragment = ' %s=%s' % (key, value)
+
+        if kw.get('keep_unicode', False):
+            fragment = fragment.decode('utf8', 'replace')
+        msg += fragment
+
         msg_len += added_len
 
     return msg
@@ -300,8 +345,9 @@ def log_cef(name, severity, environ, config, username='none',
         - extra keywords: extra keys used in the CEF extension
     """
     config = _filter_params('cef', config)
+
     fields = _get_fields(name, severity, environ, config, username=username,
-                        signature=signature, **kw)
+                         signature=signature, **kw)
     msg = _format_msg(fields, kw)
 
     if config['file'] == 'syslog':
