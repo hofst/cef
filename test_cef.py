@@ -200,8 +200,7 @@ class TestCEFLogger(unittest.TestCase):
 
         # Note that csLabel can't be coerced into unicode or decoded using UTF8
         kw = {'cs2': 1L,
-              'cs2Label': '\xd0',  
-              'keep_unicode': True}
+              'cs2Label': '\xd0'}
 
         from cef import _get_fields, _format_msg, _filter_params
         config = _filter_params('cef', config)
@@ -212,8 +211,9 @@ class TestCEFLogger(unittest.TestCase):
         signature = 'xx'
 
         fields = _get_fields(name, severity, environ, config,
-                             username=username, signature=signature, **kw)
-        msg = _format_msg(fields, kw)
+                             username=username, signature=signature,
+                             as_unicode=True, **kw)
+        msg = _format_msg(fields, kw, 1024, as_unicode=True)
 
         self.assertEquals(type(msg), unicode)
         self.assertTrue(u'cs2Label=\ufffd' in msg, msg)
@@ -228,8 +228,8 @@ class TestCEFLogger(unittest.TestCase):
         environ = {'PATH_INFO':
                    u'/reviewers/receipt/issue/\u043f\u0442\u0442-news'}
         kw = {'cs2': 1L,
-              'cs2Label': u'\xd0',
-              'keep_unicode': True}
+              'cs2Label': u'\xd0'}
+              
 
         from cef import _get_fields, _format_msg, _filter_params
         config = _filter_params('cef', config)
@@ -240,8 +240,9 @@ class TestCEFLogger(unittest.TestCase):
         signature = 'xx'
 
         fields = _get_fields(name, severity, environ, config,
-                             username=username, signature=signature, **kw)
-        msg = _format_msg(fields, kw)
+                             username=username, signature=signature, 
+                             as_unicode=True, **kw)
+        msg = _format_msg(fields, kw, 1024, as_unicode=True)
 
         self.assertEquals(type(msg), unicode)
         self.assertTrue(u'cs2Label=\xd0' in msg, msg)
