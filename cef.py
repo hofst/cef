@@ -131,9 +131,10 @@ def _convert_prefix(data):
     return _PREFIX.sub(r'\\\1', data)
 
 
-def _convert_ext(data):
+def _convert_ext(data, as_unicode=False):
     """Escapes | and = and convert to utf8 string"""
-    data = _to_str(data)
+    if not as_unicode:
+        data = _to_str(data)
     return _EXTENSION.sub(r'\\\1', data)
 
 
@@ -152,14 +153,14 @@ def _syslog(msg, config):
     logopt = _str2logopt(config.get('syslog_options'))
     facility = _str2facility(config.get('syslog_facility'))
     ident = config.get('syslog_ident', sys.argv[0])
-    priority = _str2priority(config.get('syslog.priority'))
+    priority = _str2priority(config.get('syslog_priority'))
     with _log_lock:
         global _LOG_OPENED
         if _LOG_OPENED != (ident, logopt, facility):
             syslog.openlog(ident, logopt, facility)
             _LOG_OPENED = ident, logopt, facility
         if isinstance(msg, unicode):
-            msg = msg.encode('utf-8')
+            msg = msg.encode('utf8')
         syslog.syslog(priority, msg)
 
 
@@ -209,7 +210,7 @@ def _filter_params(namespace, data, replace_dot='_', splitchar='.'):
 
 
 def _get_fields(name, severity, environ, config, username=None,
-               signature=None, **kw):
+                signature=None, as_unicode=False, **kw):
     name = _convert_prefix(name)
     if signature is None:
         signature = name
@@ -219,21 +220,32 @@ def _get_fields(name, severity, environ, config, username=None,
     severity = _convert_prefix(severity)
     source = _get_source_ip(environ)
 
+    if as_unicode:
+        _host = _HOST
+        _username = username
+    else:
+        _host = _to_str(_HOST)
+        _username = _to_str(username)
+
     fields = {'severity': severity,
               'source': source,
-              'method': _convert_ext(environ.get('REQUEST_METHOD', '')),
-              'url': _convert_ext(environ.get('PATH_INFO', '')),
-              'dest': _convert_ext(environ.get('HTTP_HOST', u'none')),
+              'method': _convert_ext(environ.get('REQUEST_METHOD', ''),
+                                     as_unicode),
+              'url': _convert_ext(environ.get('PATH_INFO', ''),
+                                  as_unicode),
+              'dest': _convert_ext(environ.get('HTTP_HOST', u'none'),
+                                   as_unicode),
               'user_agent': _convert_ext(environ.get('HTTP_USER_AGENT',
-                                                     u'none')),
+                                                     u'none'),
+                                         as_unicode),
               'signature': signature,
               'name': name,
               'version': config['version'],
               'vendor': config['vendor'],
               'device_version': config['device_version'],
               'product': config['product'],
-              'host': _to_str(_HOST),
-              'suser': _to_str(username),
+              'host': _host,
+              'suser': _username,
               'date': strftime("%b %d %H:%M:%S")}
 
     # make sure we don't have a | anymore in regular fields
@@ -257,17 +269,37 @@ def _len(data):
     return len(str(data))
 
 
-def _format_msg(fields, kw, maxlen=_MAXLEN):
+def _force_unicode(s):
+    if isinstance(s, str):
+        try:
+            s = unicode(s, 'utf8', 'replace')
+        except UnicodeDecodeError:
+            try:
+                s = s.decode('utf8', 'replace')
+            except UnicodeDecodeError, e:
+                raise UnicodeDecodeError("Unable to force a unicode string", e)
+    return s
+
+
+def _format_msg(fields, kw, maxlen=_MAXLEN, as_unicode=False):
     # adding custom extensions
     # sorting by size
+    if as_unicode:
+        for k, v in fields.items():
+            v = _force_unicode(v)
+            fields[k] = v
+
     msg = _CEF_FORMAT % fields
 
     extensions = [(_len(value), len(key), key, value)
-                    for key, value in kw.items()
+                  for key, value in kw.items()
                   if key not in _EXTENSIONS]
     extensions.sort()
 
     msg_len = len(msg)
+
+    if as_unicode:
+        msg = _force_unicode(msg)
 
     for value_len, key_len, key, value in extensions:
         added_len = value_len + key_len + 2
@@ -280,14 +312,20 @@ def _format_msg(fields, kw, maxlen=_MAXLEN):
             logger.warning(warn)
             break
 
-        msg += ' %s=%s' % (key, value)
+        fragment = ' %s=%s' % (key, value)
+
+        if as_unicode:
+            fragment = _force_unicode(fragment)
+
+        msg += fragment
+
         msg_len += added_len
 
     return msg
 
 
 def log_cef(name, severity, environ, config, username='none',
-            signature=None, **kw):
+            signature=None, as_unicode=False, **kw):
     """Creates a CEF record, and emit it in syslog or another file.
 
     Args:
@@ -300,9 +338,11 @@ def log_cef(name, severity, environ, config, username='none',
         - extra keywords: extra keys used in the CEF extension
     """
     config = _filter_params('cef', config)
+
     fields = _get_fields(name, severity, environ, config, username=username,
-                         signature=signature, **kw)
-    msg = _format_msg(fields, kw)
+                         signature=signature, as_unicode=as_unicode, **kw)
+
+    msg = _format_msg(fields, kw, maxlen=_MAXLEN, as_unicode=as_unicode)
 
     if config['file'] == 'syslog':
         if not SYSLOG:
