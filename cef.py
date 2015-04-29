@@ -301,7 +301,7 @@ def log_cef(name, severity, environ, config, username='none',
     """
     config = _filter_params('cef', config)
     fields = _get_fields(name, severity, environ, config, username=username,
-                        signature=signature, **kw)
+                         signature=signature, **kw)
     msg = _format_msg(fields, kw)
 
     if config['file'] == 'syslog':
